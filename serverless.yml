@@ -2,13 +2,19 @@ service: aws-node-line-bot
 
 provider:
   name: aws
-  runtime: nodejs12.x
-  profile: serverless-admin
+  runtime: nodejs16.x
+  profile: default
   region: ap-northeast-1
   stage: ${opt:stage, 'dev'}
   environment:
     CHANNEL_ACCESS_TOKEN: "YOUR LINE CHANNEL ACCESS TOKEN"
     CHANNEL_SECRET: "YOUR LINE CHANNEL SECRET"
+    OPENAI_API_KEY: "YOUR OPENAI API KEY"
+
+custom:
+  prune:
+    automatic: true
+    number: 3
 
 functions:
   bot:
@@ -18,3 +24,6 @@ functions:
           path: callback
           method: post
           cors: true
+
+plugins:
+  - serverless-prune-plugin  

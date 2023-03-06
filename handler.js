@@ -1,9 +1,18 @@
-'use strict';
+"use strict";
 
-const line = require('@line/bot-sdk');
-const crypto = require('crypto');
-const request = require('request');
+const line = require("@line/bot-sdk");
+const axios = require("axios");
+const Redis = require("ioredis");
+const crypto = require("crypto");
+const request = require("request");
+const Log = require("@dazn/lambda-powertools-logger");
 
+const redis = new Redis.Cluster([
+  { port: 6379, host: process.env.REDIS_URL1 },
+  { port: 6379, host: process.env.REDIS_URL2 },
+]);
+
+// LINEの設定
 const client = new line.Client({
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
@@ -12,56 +21,132 @@ const client = new line.Client({
 function generateResponse(statusCode, lineStatus, message) {
   return {
     statusCode: statusCode,
-    headers: { 'X-Line-Status': lineStatus },
+    headers: { "X-Line-Status": lineStatus },
     body: `{"result":"${message}"}`,
   };
 }
 
-function validateSignature(event) {
-  const signature = crypto.createHmac('sha256', process.env.CHANNEL_SECRET).update(event.body).digest('base64');
-  const checkHeader = (event.headers || {})['X-Line-Signature'];
-  return signature === checkHeader;
+async function getCompletion(context) {
+  const model = "gpt-3.5-turbo";
+  const url = "https://api.openai.com/v1/chat/completions";
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+  };
+  const data = {
+    model,
+    max_tokens: 250,
+    messages: context,
+  };
+  try {
+    const response = await axios.post(url, data, { headers });
+    Log.info("GPT-3", { data: response.data });
+    return response.data;
+  } catch (error) {
+    Log.error("GPT-3", { error });
+    return null;
+  }
 }
 
+// Redisにコンテキストを保存する
+async function saveContext(userId, context) {
+  // expireを設定する
+  try {
+    Log.info("Redis", { context });
+    await redis.set(`line-gpt35turbo-${userId}`, context);
+    await redis.expire(context.userId, 60 * 60 * 24);
+  } catch (error) {
+    Log.error("Redis", { error });
+    return null;
+  }
+}
+
+// Redisからコンテキストを取得する
+async function getContext(userId) {
+  try {
+    const context = await redis.get(`line-gpt35turbo-${userId}`);
+    return context;
+  } catch (error) {
+    Log.error("Redis", { error });
+    return null;
+  }
+}
+
+const validateSignature = (event) => {
+  const signature = event.headers["X-Line-Signature"];
+  const body = event.body;
+  const hash = crypto
+    .createHmac("sha256", process.env.CHANNEL_SECRET)
+    .update(body)
+    .digest("base64");
+  return hash === signature;
+};
+
 function isLineConnectionError(replyToken, context) {
-  if (replyToken !== '00000000000000000000000000000000') return false;
+  if (replyToken !== "00000000000000000000000000000000") return false;
   // 接続確認エラー回避
-  context.succeed(generateResponse(200, 'OK', 'connect check'));
+  context.succeed(generateResponse(200, "OK", "connect check"));
   return true;
 }
 
-function getUserProfile(userId) {
-  return {
-    url: 'https://api.line.me/v2/bot/profile/' + userId,
-    json: true,
-    headers: {
-      'Authorization': 'Bearer {' + process.env.CHANNEL_ACCESS_TOKEN + '}',
-    },
-  };
+// LINEのユーザープロフィールを取得する
+async function getUserProfile(userId) {
+  try {
+    const profile = await client.getProfile(userId);
+    return profile;
+  } catch (error) {
+    console.error(`Get profile error: ${error}`);
+    return null;
+  }
 }
 
-module.exports.callback = (event, context) => {
+// LINEにメッセージを返信する
+async function replyMessage(replyToken, message) {
+  try {
+    const result = await client.replyMessage(replyToken, message);
+    return result;
+  } catch (error) {
+    console.error(`Get profile error: ${error}`);
+    return null;
+  }
+}
+
+const mergeMessages = (chatContext, text) => {
+  let messages = [];
+  if (chatContext) {
+    messages = JSON.parse(chatContext);
+  }
+  messages.push({ role: "user", content: text });
+  return messages;
+};
+
+// メイン処理
+module.exports.callback = async (event, context) => {
   const body = JSON.parse(event.body);
   const userId = body.events[0].source.userId;
   const text = body.events[0].message.text;
   const replyToken = body.events[0].replyToken;
 
-  if (!validateSignature(event)) return;
-  if (isLineConnectionError(replyToken, context)) return;
+  // redisからコンテキストを取得する
+  const chatContext = await getContext(userId);
+  const messages = mergeMessages(chatContext, text);
+  Log.info("一連のメッセージ", { messages });
 
-  request.get(getUserProfile(userId), function (error, response, body) {
-    if (error || response.statusCode != 200) return;
+  // 会話の内容をすべて引数に渡す
+  const response = await getCompletion(messages);
 
-    const message = {
-      'type': 'text',
-      'text': 'hello!!' + body.displayName + 'さん\n' + text,
-    };
+  // 返信を組み立てる
+  const message = {
+    type: "text",
+    text: response.choices[0].message.content,
+  };
+  const messageResult = await replyMessage(replyToken, message);
 
-    client.replyMessage(replyToken, message)
-      // eslint-disable-next-line no-unused-vars
-      .then((response) => {
-        context.succeed(generateResponse(200, 'OK', 'complete'));
-      })
-      .catch((err) => console.log(err));
-  });
+  // 結果をredisに保存する
+  messages.push(response.choices[0].message);
+  await saveContext(userId, JSON.stringify(messages));
+  Log.info("送信結果", { data: messageResult });
+
+  // リソースが作られたことを示す
+  return generateResponse(201, "OK", "success");
 };
