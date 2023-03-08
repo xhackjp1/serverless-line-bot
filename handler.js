@@ -3,7 +3,6 @@
 const line = require("@line/bot-sdk");
 const axios = require("axios");
 const Redis = require("ioredis");
-const crypto = require("crypto");
 const request = require("request");
 const Log = require("@dazn/lambda-powertools-logger");
 
@@ -18,6 +17,7 @@ const client = new line.Client({
   channelSecret: process.env.CHANNEL_SECRET,
 });
 
+// レスポンス生成
 function generateResponse(statusCode, lineStatus, message) {
   return {
     statusCode: statusCode,
@@ -26,6 +26,7 @@ function generateResponse(statusCode, lineStatus, message) {
   };
 }
 
+// GPT-3にリクエストを送信する
 async function getCompletion(context) {
   const model = "gpt-3.5-turbo";
   const url = "https://api.openai.com/v1/chat/completions";
@@ -35,7 +36,7 @@ async function getCompletion(context) {
   };
   const data = {
     model,
-    max_tokens: 250,
+    max_tokens: 1024,
     messages: context,
   };
   try {
@@ -68,34 +69,6 @@ async function getContext(userId) {
     return context;
   } catch (error) {
     Log.error("Redis", { error });
-    return null;
-  }
-}
-
-const validateSignature = (event) => {
-  const signature = event.headers["X-Line-Signature"];
-  const body = event.body;
-  const hash = crypto
-    .createHmac("sha256", process.env.CHANNEL_SECRET)
-    .update(body)
-    .digest("base64");
-  return hash === signature;
-};
-
-function isLineConnectionError(replyToken, context) {
-  if (replyToken !== "00000000000000000000000000000000") return false;
-  // 接続確認エラー回避
-  context.succeed(generateResponse(200, "OK", "connect check"));
-  return true;
-}
-
-// LINEのユーザープロフィールを取得する
-async function getUserProfile(userId) {
-  try {
-    const profile = await client.getProfile(userId);
-    return profile;
-  } catch (error) {
-    console.error(`Get profile error: ${error}`);
     return null;
   }
 }
