@@ -51,7 +51,6 @@ async function getCompletion(context) {
 
 // Redisにコンテキストを保存する
 async function saveContext(userId, context) {
-  // expireを設定する
   try {
     Log.info("Redis", { context });
     await redis.set(`line-gpt35turbo-${userId}`, context);
@@ -84,6 +83,7 @@ async function replyMessage(replyToken, message) {
   }
 }
 
+// メッセージを結合する
 const mergeMessages = (chatContext, text) => {
   let messages = [];
   if (chatContext) {
@@ -111,7 +111,7 @@ module.exports.callback = async (event, context) => {
   // 返信を組み立てる
   const message = {
     type: "text",
-    text: response.choices[0].message.content,
+    text: response.choices[0].message.content.trim(),
   };
   const messageResult = await replyMessage(replyToken, message);
 
