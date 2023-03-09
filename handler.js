@@ -54,7 +54,7 @@ async function saveContext(userId, context) {
   try {
     Log.info("Redis", { context });
     await redis.set(`line-gpt35turbo-${userId}`, context);
-    await redis.expire(context.userId, 60 * 60 * 24);
+    await redis.expire(context.userId, 60 * 60);
   } catch (error) {
     Log.error("Redis", { error });
     return null;
@@ -66,6 +66,16 @@ async function getContext(userId) {
   try {
     const context = await redis.get(`line-gpt35turbo-${userId}`);
     return context;
+  } catch (error) {
+    Log.error("Redis", { error });
+    return null;
+  }
+}
+
+// Redisからコンテキストを削除する
+async function deleteContext(userId) {
+  try {
+    await redis.del(`line-gpt35turbo-${userId}`);
   } catch (error) {
     Log.error("Redis", { error });
     return null;
@@ -107,19 +117,28 @@ module.exports.callback = async (event, context) => {
 
   // 会話の内容をすべて引数に渡す
   const response = await getCompletion(messages);
+  if (response) {
+    const message = {
+      type: "text",
+      text: response.choices[0].message.content.trim(),
+    };
+    const messageResult = await replyMessage(replyToken, message);
 
-  // 返信を組み立てる
-  const message = {
-    type: "text",
-    text: response.choices[0].message.content.trim(),
-  };
-  const messageResult = await replyMessage(replyToken, message);
+    // 結果をredisに保存する
+    messages.push(response.choices[0].message);
+    await saveContext(userId, JSON.stringify(messages));
+    Log.info("送信結果", { data: messageResult });
 
-  // 結果をredisに保存する
-  messages.push(response.choices[0].message);
-  await saveContext(userId, JSON.stringify(messages));
-  Log.info("送信結果", { data: messageResult });
+    // リソースが作られたことを示す
+    return generateResponse(201, "OK", "success");
+  } else {
+    await replyMessage(replyToken, {
+      type: "text",
+      text: "タイムアウトエラーです。時間を置いて再度お試しください。",
+    });
+    // contextを削除する
+    await deleteContext(userId);
 
-  // リソースが作られたことを示す
-  return generateResponse(201, "OK", "success");
+    return generateResponse(500, "NG", "error");
+  }
 };
