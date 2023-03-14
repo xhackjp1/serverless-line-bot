@@ -17,7 +17,8 @@
     "crypto": "^1.0.1",
     "ioredis": "^5.3.1",
     "node-fetch": "^2.6.7",
-    "request": "^2.88.2"
+    "request": "^2.88.2",
+    "twitter": "^1.7.1"
   },
   "devDependencies": {
     "serverless-prune-plugin": "^2.0.2"

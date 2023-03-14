@@ -1,15 +1,16 @@
 "use strict";
 
+const Log = require("@dazn/lambda-powertools-logger");
 const line = require("@line/bot-sdk");
 const axios = require("axios");
 const Redis = require("ioredis");
 const request = require("request");
-const Log = require("@dazn/lambda-powertools-logger");
+const sendMessage = require("./util/send_message.js");
 
-const redis = new Redis.Cluster([
-  { port: 6379, host: process.env.REDIS_URL1 },
-  { port: 6379, host: process.env.REDIS_URL2 },
-]);
+// const redis = new Redis.Cluster([
+//   { port: 6379, host: process.env.REDIS_URL1 },
+//   { port: 6379, host: process.env.REDIS_URL2 },
+// ]);
 
 // LINEの設定
 const client = new line.Client({
@@ -26,9 +27,33 @@ function generateResponse(statusCode, lineStatus, message) {
   };
 }
 
-// GPT-3にリクエストを送信する
+// // GPT-3にリクエストを送信する
+// async function getCompletion(context) {
+//   const model = "gpt-3.5-turbo";
+//   const url = "https://api.openai.com/v1/chat/completions";
+//   const headers = {
+//     "Content-Type": "application/json",
+//     Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+//   };
+//   const data = {
+//     model,
+//     max_tokens: 1024,
+//     messages: context,
+//   };
+//   try {
+//     const response = await axios.post(url, data, { headers });
+//     Log.info("GPT-3", { data: response.data });
+//     return response.data;
+//   } catch (error) {
+//     Log.error("GPT-3", { error });
+//     return null;
+//   }
+// }
+
+// GPT-4にリクエストを送信する
 async function getCompletion(context) {
-  const model = "gpt-3.5-turbo";
+  // const model = "gpt-3.5-turbo";
+  const model = "gpt-3.5-turbo-0301";
   const url = "https://api.openai.com/v1/chat/completions";
   const headers = {
     "Content-Type": "application/json",
@@ -36,7 +61,7 @@ async function getCompletion(context) {
   };
   const data = {
     model,
-    max_tokens: 1024,
+    max_tokens: 2048,
     messages: context,
   };
   try {
@@ -103,7 +128,7 @@ const mergeMessages = (chatContext, text) => {
   return messages;
 };
 
-// メイン処理
+// LINEメイン処理
 module.exports.callback = async (event, context) => {
   const body = JSON.parse(event.body);
   const userId = body.events[0].source.userId;
@@ -141,4 +166,34 @@ module.exports.callback = async (event, context) => {
 
     return generateResponse(500, "NG", "error");
   }
+};
+
+// Twitterメイン処理
+module.exports.tweet = async (event, context) => {
+  const headers = { Authorization: `Bearer ${process.env.API_TOKEN}` };
+  const apiParams = {
+    api_key: process.env.PARKLOT_API_KEY,
+    client_id: process.env.PARKLOT_CLIENT_ID,
+    token: process.env.API_TOKEN,
+  };
+  const ongoingUrl = `${process.env.BASE_URL}/hashtag_campaign/lambda/hashtag_campaigns/ongoing`;
+
+  // 進行中のキャンペーンを取得する
+  const response = await axios.get(ongoingUrl, {
+    headers,
+    params: apiParams,
+  });
+  const hashtag_campaigns = response.data.records.hashtag_campaigns;
+  Log.info("開催中キャンペーン", hashtag_campaigns);
+
+  // フォローチェック
+  axios.get("https://api.twitter.com/1.1/friendships/show.json", {
+    headers,
+    params: {
+      source_screen_name: process.env.TWITTER_SCREEN_NAME,
+      target_screen_name: process.env.TWITTER_TARGET_SCREEN_NAME,
+    },
+  });
+
+  // await sendMessage("メッセージを受信しました。");
 };
