@@ -7,10 +7,10 @@ const Redis = require("ioredis");
 const request = require("request");
 const sendMessage = require("./util/send_message.js");
 
-// const redis = new Redis.Cluster([
-//   { port: 6379, host: process.env.REDIS_URL1 },
-//   { port: 6379, host: process.env.REDIS_URL2 },
-// ]);
+const redis = new Redis.Cluster([
+  { port: 6379, host: process.env.REDIS_URL1 },
+  { port: 6379, host: process.env.REDIS_URL2 },
+]);
 
 // LINEの設定
 const client = new line.Client({
@@ -63,6 +63,7 @@ async function getCompletion(context) {
     model,
     max_tokens: 2048,
     messages: context,
+    // stream: true,
   };
   try {
     const response = await axios.post(url, data, { headers });

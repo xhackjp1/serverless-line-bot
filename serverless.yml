@@ -17,8 +17,9 @@ custom:
     number: 3
 
 functions:
-  bot:
+  line-bot:
     handler: handler.callback
+    timeout: 900
     events:
       - http:
           path: callback
