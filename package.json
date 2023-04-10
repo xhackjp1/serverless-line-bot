@@ -12,7 +12,7 @@
   "dependencies": {
     "@dazn/lambda-powertools-logger": "^1.28.1",
     "@line/bot-sdk": "^7.5.2",
-    "aws-sdk": "^2.814.0",
+    "aws-sdk": "^2.1354.0",
     "crypto": "^1.0.1",
     "node-fetch": "^2.6.7",
     "request": "^2.88.2"
